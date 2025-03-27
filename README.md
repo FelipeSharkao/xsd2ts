@@ -2,8 +2,8 @@
 
 Convert XSD to TS types.
 
-Just call `bun run start <path to files> > output.ts`. It will generate a file that export
-a type for every type and element defined in the XSD files. It was designed to work aout
+Just call `bun run start <path to files> > output.ts`. It will generate a file that exports
+a type for every type and element defined in the XSD files. It was designed to work out
 of the box with [fast-xml-parser](https://www.npmjs.com/package/fast-xml-parser).
 
 ## Options
