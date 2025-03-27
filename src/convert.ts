@@ -384,6 +384,10 @@ export class ComplexType implements TypeDefinition {
 
     toTSTypeExpr() {
         let s = "XmlElement";
+        if (this.attributes.length) {
+            const attributes = this.attributes.map((x) => x.toTSField()).join("\n");
+            s += ` & {\n${prefixLines(attributes)}\n}`;
+        }
         if (this.variants.length) {
             let body = "";
             for (const variant of this.variants) {
@@ -401,10 +405,6 @@ export class ComplexType implements TypeDefinition {
                 body += `\n}`;
             }
             s += " & " + (this.variants.length > 1 ? `(${body})` : body);
-        }
-        if (this.attributes.length) {
-            const attributes = this.attributes.map((x) => x.toTSField()).join("\n");
-            s += `& {\n${prefixLines(attributes)}\n}`;
         }
         return s || "unknown";
     }
