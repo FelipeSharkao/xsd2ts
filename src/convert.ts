@@ -388,7 +388,17 @@ export class ComplexType implements TypeDefinition {
             let body = "";
             for (const variant of this.variants) {
                 const fields = variant.elements.map((x) => x.toTSField()).join("\n");
-                body += `${body && " | "}{\n${prefixLines(fields)}\n}`;
+                body += `${body && " | "}{\n${prefixLines(fields)}`
+
+                for (const otherVariant of this.variants) {
+                    if (otherVariant === variant) continue;
+
+                    for (const otherElement of otherVariant.elements) {
+                        body += `\n${prefixLines("")}${otherElement.name}?: undefined;`
+                    }
+                }
+
+                body += `\n}`;
             }
             s += " & " + (this.variants.length > 1 ? `(${body})` : body);
         }
