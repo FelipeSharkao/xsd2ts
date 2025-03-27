@@ -79,7 +79,7 @@ export class Context {
             `  "${this.attributePrefix}xmlns"?: string;\n` +
             `  [ns: \`${this.attributePrefix}xmlns:\${string}\`]: string | undefined;\n` +
             `};\n\n` +
-            `type Prolog = { "?xml"?: { version: string, encoding: string } };`;
+            `type Prolog = { "?xml"?: { "${this.attributePrefix}version": string, "${this.attributePrefix}encoding": string } };`;
 
         for (const schema of this.schemas.values()) {
             const tsSchema = schema.toTS();
