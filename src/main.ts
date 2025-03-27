@@ -15,6 +15,7 @@ async function main() {
     const { values, positionals } = parseArgs({
         options: {
             "strip-prefix": { type: "string", short: "p", multiple: true },
+            "attribute-prefix": { type: "string", short: "a" },
         },
         allowPositionals: true,
     });
@@ -23,6 +24,10 @@ async function main() {
 
     for (const prefix of values["strip-prefix"] ?? []) {
         ctx.stripPrefixes.push(prefix);
+    }
+
+    if (values["attribute-prefix"]) {
+        ctx.attributePrefix = values["attribute-prefix"];
     }
 
     for (const path of positionals) {
