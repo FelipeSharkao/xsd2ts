@@ -1,0 +1,19 @@
+{
+    "name": "xsd2ts",
+    "module": "index.ts",
+    "type": "module",
+    "private": true,
+    "scripts": {
+        "start": "bun src/main.ts"
+    },
+    "devDependencies": {
+        "@types/bun": "latest"
+    },
+    "peerDependencies": {
+        "typescript": "^5"
+    },
+    "dependencies": {
+        "@std/text": "npm:@jsr/std__text",
+        "fast-xml-parser": "^5.0.9"
+    }
+}
