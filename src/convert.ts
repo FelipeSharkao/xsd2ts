@@ -1,6 +1,13 @@
 import path from "node:path"
 import { toPascalCase } from "@std/text"
-import { asArray, parseXml, prefixLines, type Many } from "./utils"
+import {
+    asArray,
+    cwdFromPath,
+    getFileContent,
+    parseXml,
+    prefixLines,
+    type Many,
+} from "./utils"
 import type {
     Xsd,
     XsSchema,
@@ -48,27 +55,13 @@ export class Context {
     }
 
     async loadSchema(path_: string) {
-        let url: URL | undefined
-        let cwd: string
-        try {
-            url = new URL(path_)
-            cwd = url.origin + path.dirname(url.pathname)
-        } catch (_) {
-            cwd = path.dirname(path_)
-        }
+        const cwd = cwdFromPath(path_)
 
         console.error(`Loading ${path_} (${cwd})`)
+        const content = await getFileContent(path_)
 
-        let content: string
-        if (url) {
-            const res = await fetch(url)
-            content = await res.text()
-        } else {
-            content = await Bun.file(path_).text()
-        }
-
-        const xsd: Xsd = parseXml(content, { preserveNamespaces: true })
-        return Schema.fromXsd(this, xsd["xs:schema"], cwd)
+        const xsd: Xsd = parseXml(content)
+        return Schema.fromXsd(this, xsd["schema"], cwd)
     }
 
     toTS() {
@@ -96,7 +89,9 @@ export class Context {
                 break
             }
         }
-        return toPascalCase(name)
+        name = toPascalCase(name)
+
+        return name
     }
 }
 
@@ -126,7 +121,7 @@ export class Schema {
             o.aliasedSchemas.set(nsAlias, nsNamespace)
         }
 
-        for (const importNode of asArray(node["xs:import"] ?? [])) {
+        for (const importNode of asArray(node["import"] ?? [])) {
             if (ctx.schemas.has(importNode["@_namespace"])) continue
             const location = importNode["@_schemaLocation"]
             const path_ =
@@ -136,16 +131,16 @@ export class Schema {
             await ctx.loadSchema(path_)
         }
 
-        for (const elementNode of asArray(node["xs:element"] ?? [])) {
+        for (const elementNode of asArray(node["element"] ?? [])) {
             const element = Element.fromXsd(ctx, o, elementNode)
             o.elements.set(element.name, element)
         }
 
-        for (const simpleTypeNode of asArray(node["xs:simpleType"] || [])) {
+        for (const simpleTypeNode of asArray(node["simpleType"] || [])) {
             o.addType(SimpleType.fromXsd(ctx, o, simpleTypeNode))
         }
 
-        for (const complexTypeNode of asArray(node["xs:complexType"] || [])) {
+        for (const complexTypeNode of asArray(node["complexType"] || [])) {
             o.addType(ComplexType.fromXsd(ctx, o, complexTypeNode))
         }
 
@@ -160,6 +155,18 @@ export class Schema {
     addType(type: TypeDefinition) {
         console.error(`Adding type ${type.toTSTypeName()} (${type.name})`)
         this.types.set(type.name, type)
+    }
+
+    resolveRef(node: string) {
+        const parts = node.split(":")
+
+        let name = parts.at(-1)
+        let ns = parts.at(-2)
+        const namespace = ns ? this.aliasedSchemas.get(ns!) : this.namespace
+
+        if (!name || !namespace || parts.length > 2) return null
+
+        return { namespace, name }
     }
 
     toTS() {
@@ -221,35 +228,33 @@ export class SimpleType implements TypeDefinition {
         const o = new SimpleType(
             ctx,
             node["@_name"],
-            TypeReference.fromXsd(ctx, schema, node["xs:restriction"]["@_base"]),
+            TypeReference.fromXsd(ctx, schema, node["restriction"]["@_base"]),
         )
-        if (node["xs:annotation"]) {
-            o.annotations = Annotations.fromXsd(node["xs:annotation"])
+        if (node["annotation"]) {
+            o.annotations = Annotations.fromXsd(node["annotation"])
         }
-        if (node["xs:restriction"]["xs:minInclusive"]) {
-            o.minInclusive = Number(node["xs:restriction"]["xs:minInclusive"]["@_value"])
+        if (node["restriction"]["minInclusive"]) {
+            o.minInclusive = Number(node["restriction"]["minInclusive"]["@_value"])
         }
-        if (node["xs:restriction"]["xs:totalDigits"]) {
-            o.totalDigits = Number(node["xs:restriction"]["xs:totalDigits"]["@_value"])
+        if (node["restriction"]["totalDigits"]) {
+            o.totalDigits = Number(node["restriction"]["totalDigits"]["@_value"])
         }
-        if (node["xs:restriction"]["xs:fractionDigits"]) {
-            o.fractionDigits = Number(node["xs:restriction"]["xs:fractionDigits"]["@_value"])
+        if (node["restriction"]["fractionDigits"]) {
+            o.fractionDigits = Number(node["restriction"]["fractionDigits"]["@_value"])
         }
-        if (node["xs:restriction"]["xs:minLength"]) {
-            o.minLength = Number(node["xs:restriction"]["xs:minLength"]["@_value"])
+        if (node["restriction"]["minLength"]) {
+            o.minLength = Number(node["restriction"]["minLength"]["@_value"])
         }
-        if (node["xs:restriction"]["xs:maxLength"]) {
-            o.maxLength = Number(node["xs:restriction"]["xs:maxLength"]["@_value"])
+        if (node["restriction"]["maxLength"]) {
+            o.maxLength = Number(node["restriction"]["maxLength"]["@_value"])
         }
-        if (node["xs:restriction"]["xs:pattern"]) {
-            o.pattern = node["xs:restriction"]["xs:pattern"]["@_value"]
+        if (node["restriction"]["pattern"]) {
+            o.pattern = node["restriction"]["pattern"]["@_value"]
         }
-        const enumeration = asArray(node["xs:restriction"]["xs:enumeration"] ?? []).map(
-            (x) => ({
-                value: x["@_value"],
-                annotations: x["xs:annotation"] && Annotations.fromXsd(x["xs:annotation"]),
-            }),
-        )
+        const enumeration = asArray(node["restriction"]["enumeration"] ?? []).map((x) => ({
+            value: x["@_value"],
+            annotations: x["annotation"] && Annotations.fromXsd(x["annotation"]),
+        }))
         if (enumeration.length) {
             o.enumeration = enumeration
         }
@@ -271,7 +276,7 @@ export class SimpleType implements TypeDefinition {
         if (this.annotations) {
             docs += this.annotations.toTSDoc()
         }
-        if (this.enumeration?.length) {
+        if (this.enumeration?.some((x) => x.annotations?.documentation?.length)) {
             docs += (docs && "\n *\n") + " * Possible values:"
             for (const variant of this.enumeration) {
                 docs += `\n * - ${variant.value}: ${variant.annotations?.documentation[0] || ""}`
@@ -328,9 +333,9 @@ export class TypeReference {
     ) {}
 
     static fromXsd(ctx: Context, schema: Schema, node: string) {
-        const [ns, name] = node.split(":") as [string, string]
-        const namespace = schema.aliasedSchemas.get(ns)!
-        return new TypeReference(ctx, namespace, name)
+        const ref = schema.resolveRef(node)
+        if (!ref) throw new Error(`Invalid type reference: ${node}`)
+        return new TypeReference(ctx, ref.namespace, ref.name)
     }
 
     toTSTypeExpr() {
@@ -353,23 +358,23 @@ export class ComplexType implements TypeDefinition {
 
     static fromXsd(ctx: Context, schema: Schema, node: XsComplexType) {
         const o = new ComplexType(ctx, node["@_name"])
-        if (node["xs:annotation"]) {
-            o.annotations = Annotations.fromXsd(node["xs:annotation"])
+        if (node["annotation"]) {
+            o.annotations = Annotations.fromXsd(node["annotation"])
         }
 
-        const sequence = asArray(node["xs:sequence"]?.["xs:element"] ?? []).map((x) =>
+        const sequence = asArray(node["sequence"]?.["element"] ?? []).map((x) =>
             Element.fromXsd(ctx, schema, x),
         )
         if (sequence.length) {
             o.variants.push({ elements: sequence })
         }
 
-        for (const elementNode of asArray(node["xs:choice"]?.["xs:element"] ?? [])) {
+        for (const elementNode of asArray(node["choice"]?.["element"] ?? [])) {
             const element = Element.fromXsd(ctx, schema, elementNode)
             o.variants.push({ elements: [element] })
         }
 
-        for (const attributeNode of asArray(node["xs:attribute"] ?? [])) {
+        for (const attributeNode of asArray(node["attribute"] ?? [])) {
             const attribute = Attribute.fromXsd(ctx, schema, attributeNode)
             o.attributes.push(attribute)
         }
@@ -432,20 +437,20 @@ export class Element {
         let name: string
         let type: TypeReference | ComplexType
         if ("@_ref" in node) {
-            const [ns, name_] = node["@_ref"].split(":") as [string, string]
-            const namespace = schema.aliasedSchemas.get(ns)!
-            const ref = ctx.schemas.get(namespace)?.elements.get(name_)!
-            name = ref.name
-            type = ref.type
+            const ref = schema.resolveRef(node["@_ref"])
+            if (!ref) throw new Error(`Invalid element reference: ${node["@_ref"]}`)
+
+            const el = ctx.schemas.get(ref.namespace)?.elements.get(ref.name)
+            if (!el) throw new Error(`Element not found: ${ref.namespace}:${ref.name}`)
+
+            name = el.name
+            type = el.type
         } else if ("@_type" in node) {
             name = node["@_name"]
             type = TypeReference.fromXsd(ctx, schema, node["@_type"])
         } else {
             name = node["@_name"]
-            type = ComplexType.fromXsd(ctx, schema, {
-                ...node["xs:complexType"],
-                "@_name": name,
-            })
+            type = ComplexType.fromXsd(ctx, schema, { ...node["complexType"], "@_name": name })
         }
 
         const o = new Element(ctx, name, type)
@@ -455,8 +460,8 @@ export class Element {
         if (node["@_maxOccurs"] && node["@_maxOccurs"] !== "unbounded") {
             o.maxOccurs = Number(node["@_maxOccurs"])
         }
-        if (node["xs:annotation"]) {
-            o.annotations = Annotations.fromXsd(node["xs:annotation"])
+        if (node["annotation"]) {
+            o.annotations = Annotations.fromXsd(node["annotation"])
         }
         return o
     }
@@ -511,8 +516,8 @@ export class Attribute {
         if (node["@_fixed"]) {
             o.fixed = node["@_fixed"]
         }
-        if (node["xs:annotation"]) {
-            o.annotations = Annotations.fromXsd(node["xs:annotation"])
+        if (node["annotation"]) {
+            o.annotations = Annotations.fromXsd(node["annotation"])
         }
         return o
     }
@@ -538,10 +543,10 @@ export class Annotations {
     constructor(public documentation: string[]) {}
 
     static fromXsd(node: Many<XsAnnotation>) {
-        return new Annotations(asArray(node).flatMap((x) => x["xs:documentation"] || []))
+        return new Annotations(asArray(node).flatMap((x) => x["documentation"] || []))
     }
 
     toTSDoc(): string {
-        return this.documentation.map((x) => ` * ${x}`).join("\n")
+        return this.documentation.map((x) => prefixLines(x, " * ")).join("\n\n")
     }
 }
