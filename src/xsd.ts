@@ -47,8 +47,14 @@ export type XsComplexType = {
 
 export type XsNestedElements = {
     attribute?: Many<XsAttribute>
-    sequence?: { element?: Many<XsElement> }
-    choice?: { element?: Many<XsElement> }
+    sequence?: XsNestedElementsBase
+    choice?: XsNestedElementsBase
+}
+
+export type XsNestedElementsBase = {
+    element?: Many<XsElement>
+    sequence?: XsNestedElementsBase
+    choice?: XsNestedElementsBase
 }
 
 export type XsImport = {

@@ -16,6 +16,7 @@ import type {
     XsElement,
     XsAnnotation,
     XsAttribute,
+    XsNestedElementsBase,
 } from "./xsd"
 
 const XS_PRIMITIVE_TYPES: [name: string, tsType: string][] = [
@@ -267,7 +268,7 @@ export class SimpleType implements TypeDefinition {
             tsType = ""
             for (const variant of this.enumeration) {
                 tsType += (tsType && " | ") + JSON.stringify(variant.value)
-                if (variant.value.match(/^\d+(\.\d+)?$/)) {
+                if (variant.value.match(/^(\d|[1-9]\d+)(\.\d+)?$/)) {
                     tsType += ` | ${variant.value}`
                 }
             }
@@ -348,7 +349,7 @@ export class TypeReference {
 
 export class ComplexType implements TypeDefinition {
     annotations?: Annotations
-    variants: { elements: Element[] }[] = []
+    parts: (Sequence | Choice)[] = []
     attributes: Attribute[] = []
 
     constructor(
@@ -362,16 +363,12 @@ export class ComplexType implements TypeDefinition {
             o.annotations = Annotations.fromXsd(node["annotation"])
         }
 
-        const sequence = asArray(node["sequence"]?.["element"] ?? []).map((x) =>
-            Element.fromXsd(ctx, schema, x),
-        )
-        if (sequence.length) {
-            o.variants.push({ elements: sequence })
+        if (node["sequence"]) {
+            o.parts.push(Sequence.fromXsd(ctx, schema, node["sequence"]))
         }
 
-        for (const elementNode of asArray(node["choice"]?.["element"] ?? [])) {
-            const element = Element.fromXsd(ctx, schema, elementNode)
-            o.variants.push({ elements: [element] })
+        if (node["choice"]) {
+            o.parts.push(Choice.fromXsd(ctx, schema, node["choice"]))
         }
 
         for (const attributeNode of asArray(node["attribute"] ?? [])) {
@@ -388,25 +385,12 @@ export class ComplexType implements TypeDefinition {
             const attributes = this.attributes.map((x) => x.toTSField()).join("\n")
             s += ` & {\n${prefixLines(attributes)}\n}`
         }
-        if (this.variants.length) {
-            let body = ""
-            for (const variant of this.variants) {
-                const fields = variant.elements.map((x) => x.toTSField()).join("\n")
-                body += `${body && " | "}{\n${prefixLines(fields)}`
-
-                for (const otherVariant of this.variants) {
-                    if (otherVariant === variant) continue
-
-                    for (const otherElement of otherVariant.elements) {
-                        body += `\n${prefixLines("")}${otherElement.name}?: undefined;`
-                    }
-                }
-
-                body += `\n}`
+        if (this.parts.length) {
+            for (const part of this.parts) {
+                s += ` & ${part.toTSTypeExpr()}`
             }
-            s += " & " + (this.variants.length > 1 ? `(${body})` : body)
         }
-        return s || "unknown"
+        return s
     }
 
     toTSType() {
@@ -496,6 +480,106 @@ export class Element {
 
     toTSTypeName() {
         return this.ctx.getTSTypeName(this.name) + "Element"
+    }
+}
+
+export class Sequence {
+    elements: (Element | Choice)[] = []
+
+    constructor(readonly ctx: Context) {}
+
+    static fromXsd(ctx: Context, schema: Schema, node: XsNestedElementsBase) {
+        const o = new Sequence(ctx)
+        for (const elementNode of asArray(node.element ?? [])) {
+            o.elements.push(Element.fromXsd(ctx, schema, elementNode))
+        }
+        for (const choiceNode of asArray(node.choice ?? [])) {
+            o.elements.push(Choice.fromXsd(ctx, schema, choiceNode))
+        }
+        return o
+    }
+
+    toTSTypeExpr() {
+        if (!this.elements.length) return "Record<string, never>"
+
+        let s = ""
+        let open = false
+        let first = true
+        for (const element of this.elements) {
+            if (element instanceof Element) {
+                if (!open) {
+                    if (!first) s += " & "
+                    s += "{"
+                    open = true
+                }
+                s += `\n${prefixLines(element.toTSField())}`
+            }
+            if (element instanceof Choice) {
+                if (open) {
+                    s += "\n}"
+                    open = false
+                }
+                if (!first) {
+                    s += " & "
+                }
+                s += element.toTSTypeExpr()
+            }
+            first = false
+        }
+        if (open) {
+            s += "\n}"
+        }
+        return s
+    }
+}
+
+export class Choice {
+    variants: Element[][] = []
+
+    constructor(readonly ctx: Context) {}
+
+    static fromXsd(ctx: Context, schema: Schema, node: XsNestedElementsBase) {
+        const o = new Choice(ctx)
+        for (const elementNode of asArray(node.element ?? [])) {
+            o.variants.push([Element.fromXsd(ctx, schema, elementNode)])
+        }
+        for (const sequenceNode of asArray(node.sequence ?? [])) {
+            const elements: Element[] = []
+            for (const elementNode of asArray(sequenceNode.element ?? [])) {
+                elements.push(Element.fromXsd(ctx, schema, elementNode))
+            }
+            o.variants.push(elements)
+        }
+        return o
+    }
+
+    toTSTypeExpr() {
+        if (!this.variants.length) return "never"
+
+        if (this.variants.length === 1) {
+            const sequence = new Sequence(this.ctx)
+            sequence.elements = this.variants[0]!
+            return sequence.toTSTypeExpr()
+        }
+
+        let s = "("
+        for (const variant of this.variants) {
+            let body = "| {"
+            for (const element of variant) {
+                body += `\n${prefixLines(element.toTSField())}`
+
+                for (const otherVariant of this.variants) {
+                    if (otherVariant === variant) continue
+                    for (const otherElement of otherVariant) {
+                        body += `\n${prefixLines(`${otherElement.name}?: undefined;`)}`
+                    }
+                }
+            }
+            body += "\n}"
+            s += `\n${prefixLines(body)}`
+        }
+        s += `\n)`
+        return s
     }
 }
 
