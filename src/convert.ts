@@ -408,8 +408,8 @@ export class ComplexType implements TypeDefinition {
 
 export class Element {
     annotations?: Annotations
-    minOccurs = 0
-    maxOccurs = Infinity
+    minOccurs = 1
+    maxOccurs = 1
 
     constructor(
         readonly ctx: Context,
@@ -441,8 +441,9 @@ export class Element {
         if (node["@_minOccurs"]) {
             o.minOccurs = Number(node["@_minOccurs"])
         }
-        if (node["@_maxOccurs"] && node["@_maxOccurs"] !== "unbounded") {
-            o.maxOccurs = Number(node["@_maxOccurs"])
+        if (node["@_maxOccurs"]) {
+            o.maxOccurs =
+                node["@_maxOccurs"] === "unbounded" ? Infinity : Number(node["@_maxOccurs"])
         }
         if (node["annotation"]) {
             o.annotations = Annotations.fromXsd(node["annotation"])
@@ -457,7 +458,9 @@ export class Element {
         } else if (this.type instanceof ComplexType) {
             tsType = this.type.toTSTypeExpr()
         }
-        if (this.maxOccurs > 1) {
+        if (this.minOccurs > 1) {
+            tsType = `${tsType}[]`
+        } else if (this.maxOccurs > 1) {
             tsType = `Many<${tsType}>`
         }
         let s = ""
