@@ -17,6 +17,7 @@ import type {
     XsAnnotation,
     XsAttribute,
     XsNestedElementsBase,
+    XsChoice,
 } from "./xsd"
 
 const XS_PRIMITIVE_TYPES: [name: string, tsType: string][] = [
@@ -538,11 +539,21 @@ export class Sequence {
 
 export class Choice {
     variants: Element[][] = []
+    minOccurs = 1
+    maxOccurs = 1
 
     constructor(readonly ctx: Context) {}
 
-    static fromXsd(ctx: Context, schema: Schema, node: XsNestedElementsBase) {
+    static fromXsd(ctx: Context, schema: Schema, node: XsChoice) {
         const o = new Choice(ctx)
+        if (node["@_minOccurs"]) {
+            o.minOccurs = Number(node["@_minOccurs"])
+        }
+        if (node["@_maxOccurs"]) {
+            o.maxOccurs =
+                node["@_maxOccurs"] === "unbounded" ? Infinity : Number(node["@_maxOccurs"])
+        }
+
         for (const elementNode of asArray(node.element ?? [])) {
             o.variants.push([Element.fromXsd(ctx, schema, elementNode)])
         }
@@ -559,7 +570,11 @@ export class Choice {
     toTSTypeExpr() {
         if (!this.variants.length) return "never"
 
-        if (this.variants.length === 1) {
+        if (this.minOccurs > 1 || this.maxOccurs > 1) {
+            throw new Error("Choice with minOccurs/maxOccurs > 1 not supported")
+        }
+
+        if (this.variants.length === 1 && this.minOccurs === 1) {
             const sequence = new Sequence(this.ctx)
             sequence.elements = this.variants[0]!
             return sequence.toTSTypeExpr()
@@ -576,6 +591,16 @@ export class Choice {
                     for (const otherElement of otherVariant) {
                         body += `\n${prefixLines(`${otherElement.name}?: undefined;`)}`
                     }
+                }
+            }
+            body += "\n}"
+            s += `\n${prefixLines(body)}`
+        }
+        if (this.minOccurs === 0) {
+            let body = "| {"
+            for (const variant of this.variants) {
+                for (const element of variant) {
+                    body += `\n${prefixLines(`${element.name}?: undefined;`)}`
                 }
             }
             body += "\n}"

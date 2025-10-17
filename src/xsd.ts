@@ -48,14 +48,19 @@ export type XsComplexType = {
 export type XsNestedElements = {
     attribute?: Many<XsAttribute>
     sequence?: XsNestedElementsBase
-    choice?: XsNestedElementsBase
+    choice?: XsChoice
 }
 
 export type XsNestedElementsBase = {
     element?: Many<XsElement>
     sequence?: XsNestedElementsBase
-    choice?: XsNestedElementsBase
+    choice?: XsChoice
 }
+
+export type XsChoice = {
+    "@_minOccurs"?: string | number
+    "@_maxOccurs"?: string | number
+} & XsNestedElementsBase
 
 export type XsImport = {
     "@_namespace": string
