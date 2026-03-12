@@ -7,6 +7,9 @@ export type XsAnnotation = {
 export type XsSimpleType = {
     "@_name": string
     annotation?: Many<XsAnnotation>
+} & XsSimpleTypeDesc
+
+export type XsSimpleTypeDesc = {
     restriction: {
         "@_base": string
         minInclusive?: { "@_value": string | number }
@@ -25,6 +28,7 @@ export type XsSimpleType = {
 export type XsElement = (
     | { "@_name": string; "@_type": string }
     | { "@_name": string; complexType: XsNestedElements }
+    | { "@_name": string; simpleType: XsSimpleTypeDesc }
     | { "@_ref": string }
 ) & {
     "@_minOccurs"?: string | number

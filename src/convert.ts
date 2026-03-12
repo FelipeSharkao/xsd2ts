@@ -263,19 +263,23 @@ export class SimpleType implements TypeDefinition {
         return o
     }
 
-    toTSType() {
-        let tsType = this?.type?.toTSTypeExpr() || "unknown"
+    toTSTypeExpr() {
+        let t = this.type.toTSTypeExpr() || "unknown"
         if (this.enumeration?.length) {
-            tsType = ""
+            t = ""
             for (const variant of this.enumeration) {
-                tsType += (tsType && " | ") + JSON.stringify(variant.value)
+                t += (t && " | ") + JSON.stringify(variant.value)
                 if (variant.value.match(/^(\d|[1-9]\d+)(\.\d+)?$/)) {
-                    tsType += ` | ${variant.value}`
+                    t += ` | ${variant.value}`
                 }
             }
         }
+        return t
+    }
+
+    toTSDoc(omitAnnotations = false) {
         let docs = ""
-        if (this.annotations) {
+        if (!omitAnnotations && this.annotations) {
             docs += this.annotations.toTSDoc()
         }
         if (this.enumeration?.some((x) => x.annotations?.documentation?.length)) {
@@ -315,7 +319,13 @@ export class SimpleType implements TypeDefinition {
                 docs += (docs && "\n") + ` * Pattern: /${this.pattern.replaceAll("/", "\\/")}/`
             }
         }
+        return docs
+    }
+
+    toTSType() {
+        const tsType = this.toTSTypeExpr()
         let s = ""
+        const docs = this.toTSDoc()
         if (docs) {
             s += `/**\n${docs}\n */\n`
         }
@@ -415,12 +425,12 @@ export class Element {
     constructor(
         readonly ctx: Context,
         readonly name: string,
-        readonly type: TypeReference | ComplexType,
+        readonly type: TypeReference | SimpleType | ComplexType,
     ) {}
 
     static fromXsd(ctx: Context, schema: Schema, node: XsElement) {
         let name: string
-        let type: TypeReference | ComplexType
+        let type: TypeReference | SimpleType | ComplexType
         if ("@_ref" in node) {
             const ref = schema.resolveRef(node["@_ref"])
             if (!ref) throw new Error(`Invalid element reference: ${node["@_ref"]}`)
@@ -433,9 +443,14 @@ export class Element {
         } else if ("@_type" in node) {
             name = node["@_name"]
             type = TypeReference.fromXsd(ctx, schema, node["@_type"])
-        } else {
+        } else if ("simpleType" in node) {
+            name = node["@_name"]
+            type = SimpleType.fromXsd(ctx, schema, { ...node["simpleType"], "@_name": name })
+        } else if ("complexType" in node) {
             name = node["@_name"]
             type = ComplexType.fromXsd(ctx, schema, { ...node["complexType"], "@_name": name })
+        } else {
+            throw new Error(`Invalid element: ${JSON.stringify(node)}`)
         }
 
         const o = new Element(ctx, name, type)
@@ -452,34 +467,50 @@ export class Element {
         return o
     }
 
-    toTSField(omitDocs = false) {
-        let tsType = "unknown"
-        if (this.type instanceof TypeReference) {
-            tsType = this.type.toTSTypeExpr()
-        } else if (this.type instanceof ComplexType) {
-            tsType = this.type.toTSTypeExpr()
+    toTSDoc() {
+        let docs = ""
+        if (this.annotations) {
+            docs += this.annotations.toTSDoc()
         }
+        if (this.type instanceof SimpleType) {
+            const typeDocs = this.type.toTSDoc(true)
+            if (typeDocs) {
+                if (docs) docs += "\n\n"
+                docs += typeDocs
+            }
+        }
+        return docs
+    }
+
+    toTSField(omitDocs = false) {
+        let tsType = this.type.toTSTypeExpr()
         if (this.minOccurs > 1) {
             tsType = `${tsType}[]`
         } else if (this.maxOccurs > 1) {
             tsType = `Many<${tsType}>`
         }
         let s = ""
-        if (this.annotations && !omitDocs) {
-            s += `/**\n${this.annotations?.toTSDoc() || ""}\n */\n`
+        if (!omitDocs) {
+            const docs = this.toTSDoc()
+            if (docs) {
+                s += `/**\n${docs}\n */\n`
+            }
         }
-        return s + `${this.name}${this.minOccurs === 0 ? "?" : ""}: ${tsType};`
+        s += `${this.name}${this.minOccurs === 0 ? "?" : ""}: ${tsType};`
+        return s
     }
 
     toTSType() {
         let s = ""
-        if (this.annotations) {
-            s += `/**\n${this.annotations?.toTSDoc() || ""}\n */\n`
+        const docs = this.toTSDoc()
+        if (docs) {
+            s += `/**\n${docs}\n */\n`
         }
-        return (
-            s
-            + `export type ${this.toTSTypeName()} = Prolog & {\n${prefixLines(this.toTSField(true))}\n};`
-        )
+        s +=
+            `export type ${this.toTSTypeName()} = Prolog & {\n`
+            + `${prefixLines(this.toTSField(true))}\n`
+            + `};`
+        return s
     }
 
     toTSTypeName() {
