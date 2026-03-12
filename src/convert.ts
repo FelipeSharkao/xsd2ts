@@ -21,7 +21,7 @@ import type {
 } from "./xsd"
 
 const XS_PRIMITIVE_TYPES: [name: string, tsType: string][] = [
-    ["string", "string"],
+    ["string", "string | number"],
     ["int", "number | string"],
     ["short", "number | string"],
     ["long", "number | string"],
