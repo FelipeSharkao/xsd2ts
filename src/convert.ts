@@ -101,6 +101,10 @@ export class Schema {
     readonly aliasedSchemas = new Map<string, string>()
     readonly elements = new Map<string, Element>()
     readonly types = new Map<string, TypeDefinition>()
+    /**
+     * Maps the TS type names to the XSD type names.
+     */
+    readonly typeNames = new Map<string, string>()
 
     constructor(
         readonly ctx: Context,
@@ -155,8 +159,17 @@ export class Schema {
     }
 
     addType(type: TypeDefinition) {
-        console.error(`Adding type ${type.toTSTypeName()} (${type.name})`)
+        const tsTypeName = type.toTSTypeName()
+        console.error(`Adding type ${tsTypeName} (${type.name})`)
+
+        const conflict = this.typeNames.get(tsTypeName)
+        if (conflict)
+            throw new Error(
+                `Duplicate type name: ${tsTypeName} (already defined for ${conflict})`,
+            )
+
         this.types.set(type.name, type)
+        this.typeNames.set(tsTypeName, type.name)
     }
 
     resolveRef(node: string) {
