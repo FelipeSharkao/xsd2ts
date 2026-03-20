@@ -120,13 +120,6 @@ export class Schema {
             ctx.schemas.set(namespace, o)
         }
 
-        for (const key in node) {
-            if (!key.startsWith("@_xmlns:")) continue
-            const nsNamespace = node[key as `@_xmlns:${string}`]!
-            const nsAlias = key.slice(8)
-            o.aliasedSchemas.set(nsAlias, nsNamespace)
-        }
-
         for (const importNode of asArray(node["import"] ?? [])) {
             if (ctx.schemas.has(importNode["@_namespace"])) continue
             const location = importNode["@_schemaLocation"]
@@ -135,6 +128,21 @@ export class Schema {
                     ? location
                     : path.join(cwd, location)
             await ctx.loadSchema(path_)
+        }
+
+        for (const key in node) {
+            if (!key.startsWith("@_xmlns:")) continue
+            const nsNamespace = node[key as `@_xmlns:${string}`]!
+            const nsAlias = key.slice(8)
+            if (!ctx.schemas.has(nsNamespace))
+                throw new Error(`Namespace not found: ${nsNamespace}`)
+            o.aliasedSchemas.set(nsAlias, nsNamespace)
+        }
+
+        if (node["@_xmlns"]) {
+            const schema = ctx.schemas.get(node["@_xmlns"])
+            if (!schema) throw new Error(`Namespace not found: ${node["@_xmlns"]}`)
+            o.include(schema)
         }
 
         for (const elementNode of asArray(node["element"] ?? [])) {
@@ -151,6 +159,18 @@ export class Schema {
         }
 
         return o
+    }
+
+    include(schema: Schema) {
+        for (const [name, el] of schema.elements) {
+            this.elements.set(name, el)
+        }
+        for (const [name, type] of schema.types) {
+            this.types.set(name, type)
+        }
+        for (const [tsType, name] of schema.typeNames) {
+            this.typeNames.set(tsType, name)
+        }
     }
 
     addElement(el: Element) {

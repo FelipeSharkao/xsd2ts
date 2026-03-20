@@ -73,6 +73,7 @@ export type XsImport = {
 
 export type XsSchema = {
     "@_targetNamespace": string
+    "@_xmlns"?: string
     [namespaces: `@_xmlns:${string}`]: string | undefined
     import?: Many<XsImport>
     element?: Many<XsElement>
