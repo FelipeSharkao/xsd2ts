@@ -34,10 +34,20 @@ const XS_PRIMITIVE_TYPES: [name: string, tsType: string][] = [
     ["dateTime", "string"],
 ]
 
+type ImportedModule = { name: string; imports: string[] }
+type Substitution = { module?: string; type: string }
+
 export class Context {
     readonly schemas = new Map<string, Schema>()
     readonly stripPrefixes: string[] = []
+    readonly importedModules = new Map<string, ImportedModule>()
+    readonly substitutions = new Map<string, Substitution>()
     attributePrefix = "@_"
+
+    /**
+     * Maps the TS type names to the XSD type names.
+     */
+    readonly typeNames = new Map<string, { namespace: string; name: string }>()
 
     constructor() {
         const xs = new Schema(this, "http://www.w3.org/2001/XMLSchema")
@@ -69,8 +79,17 @@ export class Context {
     }
 
     toTS() {
-        let s =
-            `/// File generated automatically from XSD\n\n`
+        let s = `/// File generated automatically from XSD`
+
+        if (this.importedModules.size) {
+            s += "\n"
+            for (const [path, module] of this.importedModules) {
+                s += `\nimport * as ${module.name} from "${path}";`
+            }
+        }
+
+        s +=
+            `\n\n`
             + `type Many<T> = T | readonly T[];\n\n`
             + `type XmlElement = {\n`
             + `  "${this.attributePrefix}xmlns"?: string;\n`
@@ -97,16 +116,22 @@ export class Context {
 
         return name
     }
+
+    getSubstitution(name: string) {
+        const substitution = this.substitutions.get(name)
+        if (!substitution) return null
+        return substitution.module
+            ? `${substitution.module}.${substitution.type}`
+            : substitution.type
+    }
 }
 
 export class Schema {
     readonly aliasedSchemas = new Map<string, string>()
     readonly elements = new Map<string, Element>()
     readonly types = new Map<string, TypeDefinition>()
-    /**
-     * Maps the TS type names to the XSD type names.
-     */
-    readonly typeNames = new Map<string, string>()
+    readonly includedTypes = new Map<string, TypeDefinition>()
+    readonly includedElements = new Map<string, Element>()
 
     constructor(
         readonly ctx: Context,
@@ -164,14 +189,17 @@ export class Schema {
     }
 
     include(schema: Schema) {
+        for (const [name, el] of schema.includedElements) {
+            this.includedElements.set(name, el)
+        }
         for (const [name, el] of schema.elements) {
-            this.elements.set(name, el)
+            this.includedElements.set(name, el)
+        }
+        for (const [name, type] of schema.includedTypes) {
+            this.includedTypes.set(name, type)
         }
         for (const [name, type] of schema.types) {
-            this.types.set(name, type)
-        }
-        for (const [tsType, name] of schema.typeNames) {
-            this.typeNames.set(tsType, name)
+            this.includedTypes.set(name, type)
         }
     }
 
@@ -184,14 +212,14 @@ export class Schema {
         const tsTypeName = type.toTSTypeName()
         console.error(`Adding type ${tsTypeName} (${type.name})`)
 
-        const conflict = this.typeNames.get(tsTypeName)
+        const conflict = this.ctx.typeNames.get(tsTypeName)
         if (conflict)
             throw new Error(
-                `Duplicate type name: ${tsTypeName} (already defined for ${conflict})`,
+                `Duplicate type name: ${tsTypeName} (already defined for ${conflict.namespace}:${conflict.name})`,
             )
 
         this.types.set(type.name, type)
-        this.typeNames.set(tsTypeName, type.name)
+        this.ctx.typeNames.set(tsTypeName, { namespace: this.namespace, name: type.name })
     }
 
     resolveRef(node: string) {
@@ -204,6 +232,14 @@ export class Schema {
         if (!name || !namespace || parts.length > 2) return null
 
         return { namespace, name }
+    }
+
+    getType(name: string) {
+        return this.types.get(name) || this.includedTypes.get(name)
+    }
+
+    getElement(name: string) {
+        return this.elements.get(name) || this.includedElements.get(name)
     }
 
     toTS() {
@@ -299,6 +335,9 @@ export class SimpleType implements TypeDefinition {
     }
 
     toTSTypeExpr() {
+        const substitution = this.ctx.getSubstitution(this.name)
+        if (substitution) return substitution
+
         let t = this.type.toTSTypeExpr() || "unknown"
         if (this.enumeration?.length) {
             t = ""
@@ -334,7 +373,7 @@ export class SimpleType implements TypeDefinition {
             || this.maxLength != null
             || this.pattern != null
         ) {
-            docs += "\n *"
+            docs += docs && "\n *"
             if (this.minInclusive != null) {
                 docs += (docs && "\n") + ` * Min: ${this.minInclusive}`
             }
@@ -387,7 +426,7 @@ export class TypeReference {
 
     toTSTypeExpr() {
         return (
-            this.ctx.schemas.get(this.namespace)?.types.get(this.name)?.toTSTypeName()
+            this.ctx.schemas.get(this.namespace)?.getType(this.name)?.toTSTypeName()
             || "unknown"
         )
     }
@@ -426,6 +465,9 @@ export class ComplexType implements TypeDefinition {
     }
 
     toTSTypeExpr() {
+        const substitution = this.ctx.getSubstitution(this.name)
+        if (substitution) return substitution
+
         let s = "XmlElement"
         if (this.attributes.length) {
             const attributes = this.attributes.map((x) => x.toTSField()).join("\n")
@@ -470,7 +512,7 @@ export class Element {
             const ref = schema.resolveRef(node["@_ref"])
             if (!ref) throw new Error(`Invalid element reference: ${node["@_ref"]}`)
 
-            const el = ctx.schemas.get(ref.namespace)?.elements.get(ref.name)
+            const el = ctx.schemas.get(ref.namespace)?.getElement(ref.name)
             if (!el) throw new Error(`Element not found: ${ref.namespace}:${ref.name}`)
 
             name = el.name
@@ -725,6 +767,7 @@ export class Annotations {
     }
 
     toTSDoc(): string {
-        return this.documentation.map((x) => prefixLines(x, " * ")).join("\n\n")
+        if (!this.documentation.length) return ""
+        return this.documentation.map((x) => prefixLines(x, " * ")).join("\n")
     }
 }
