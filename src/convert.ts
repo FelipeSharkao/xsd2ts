@@ -23,8 +23,10 @@ import type {
 const XS_PRIMITIVE_TYPES: [name: string, tsType: string][] = [
     ["string", "string | number"],
     ["int", "number | string"],
+    ["byte", "number | string"],
     ["short", "number | string"],
     ["long", "number | string"],
+    ["nonNegativeInteger", "number | string"],
     ["decimal", "number | string"],
     ["boolean", 'boolean | "true" | "false"'],
     ["base64Binary", "string"],
