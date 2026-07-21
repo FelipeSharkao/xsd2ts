@@ -3,6 +3,7 @@ import { toPascalCase } from "@std/text"
 import {
     asArray,
     cwdFromPath,
+    dedent,
     getFileContent,
     parseXml,
     prefixLines,
@@ -763,7 +764,12 @@ export class Annotations {
     constructor(public documentation: string[]) {}
 
     static fromXsd(node: Many<XsAnnotation>) {
-        return new Annotations(asArray(node).flatMap((x) => x["documentation"] || []))
+        return new Annotations(
+            asArray(node)
+                .flatMap((x) => x["documentation"] || [])
+                // If the XSD is indented, the indented won't be included on the first line
+                .map((x) => dedent(x, { skipFirstLine: true })),
+        )
     }
 
     toTSDoc(): string {

@@ -80,3 +80,36 @@ export async function getFileContent(path_: string) {
         return Bun.file(path_).text()
     }
 }
+
+export function dedent(s: string, opts?: { skipFirstLine?: boolean }) {
+    const lines = s.split("\n")
+
+    let minIndent: number | undefined
+    for (let i = opts?.skipFirstLine ? 1 : 0; i < lines.length; i++) {
+        let indent = 0
+        let hasContent = false
+        for (const c of lines[i]!) {
+            if (c === " " || c === "\t") {
+                indent += 1
+            } else {
+                hasContent = true
+                break
+            }
+        }
+        if (hasContent && (minIndent === undefined || indent < minIndent)) {
+            minIndent = indent
+        }
+    }
+
+    if (!minIndent) return s
+
+    const re = new RegExp(`^[ \\t]{0,${minIndent}}(.*)$`)
+
+    for (let i = 0; i < lines.length; i++) {
+        const match = lines[i]!.match(re)
+        if (!match?.[1]) continue
+        lines[i] = match[1]
+    }
+
+    return lines.join("\n")
+}
